@@ -541,7 +541,10 @@
       state.data = null
       state.error = 'DSH 未连接：' + String(error && error.message ? error.message : error)
     }).then(function () {
-      if (state.open) render()
+      // **不要在这里重建卡片。**
+      // 轮询每 5 秒跑一次，而 render() 会 `replaceChildren` —— 那会把正在输入的文字框、
+      // 正在选的时间框整个换掉，焦点与光标一起丢；用户看到的就是"打字一两秒就被中断"。
+      // 数据照常更新（到期气泡仍然会弹），卡片只在打开菜单/切页/操作完成时重建。
       checkDue()
     })
   }
