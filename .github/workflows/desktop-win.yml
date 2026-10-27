@@ -1,10 +1,8 @@
-# Build the Windows x64 desk-pet EXE.
+# Build the Windows x64 desk-pet EXE from THIS repository's default branch.
 #
-# PHASE 1 (now): the source is PINNED to the exact commit that npm published as
-# 3.4.0, so this artifact is a faithful "does the pipeline work" baseline.
-# PHASE 2 (later): delete the `ref:` line below (or set it to your own branch)
-# and drop the "Verify pinned source" step, otherwise your new commits will NOT
-# be compiled. That is the only place the pin lives.
+# Phase 1 pinned the ref to v3.4.0 to prove the pipeline. Phase 2 builds our own
+# commits (Pet Toolbox menu / reminders), so the pin is gone on purpose: whatever
+# is on the branch that triggered the run is what gets compiled.
 #
 # Manual only (workflow_dispatch). This job NEVER runs the exe: GitHub's Windows
 # runner has no interactive desktop session, and the shell needs a real window.
@@ -32,19 +30,12 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - name: Checkout (pinned v3.4.0)
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: 22443935bc6a47c9476f4eeeca5e67a209ce43f7
 
-      # A typo or a moved tag must not silently change what gets built.
-      - name: Verify pinned source
+      - name: Show source commit
         shell: pwsh
-        run: |
-          $expected = '22443935bc6a47c9476f4eeeca5e67a209ce43f7'
-          $actual = (git rev-parse HEAD).Trim()
-          if ($actual -ne $expected) { throw "source drift: expected $expected, got $actual" }
-          "source commit: $actual"
+        run: "commit " + (git rev-parse HEAD)
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
