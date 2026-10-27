@@ -1,0 +1,114 @@
+# Build the Windows x64 desk-pet EXE.
+#
+# PHASE 1 (now): the source is PINNED to the exact commit that npm published as
+# 3.4.0, so this artifact is a faithful "does the pipeline work" baseline.
+# PHASE 2 (later): delete the `ref:` line below (or set it to your own branch)
+# and drop the "Verify pinned source" step, otherwise your new commits will NOT
+# be compiled. That is the only place the pin lives.
+#
+# Manual only (workflow_dispatch). This job NEVER runs the exe: GitHub's Windows
+# runner has no interactive desktop session, and the shell needs a real window.
+# It compiles, fingerprints, and uploads the artifact; behaviour is verified on
+# the user's machine.
+name: desktop-win
+
+on:
+  workflow_dispatch:
+    inputs:
+      embed_cubism_core:
+        description: 'Also embed Cubism Core (downloads it; equals redistributing a proprietary runtime)'
+        type: boolean
+        default: false
+      run_unit_tests:
+        description: 'Also run cargo test --lib (adds a few minutes)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  win-x64:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout (pinned v3.4.0)
+        uses: actions/checkout@v4
+        with:
+          ref: 22443935bc6a47c9476f4eeeca5e67a209ce43f7
+
+      # A typo or a moved tag must not silently change what gets built.
+      - name: Verify pinned source
+        shell: pwsh
+        run: |
+          $expected = '22443935bc6a47c9476f4eeeca5e67a209ce43f7'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) { throw "source drift: expected $expected, got $actual" }
+          "source commit: $actual"
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # build.rs embeds the React UMD bundles at compile time. Missing them is
+      # only a warning at build time and a blank page at runtime, so this step
+      # is mandatory.
+      - name: React UMD (needed by build.rs)
+        run: npm ci
+        working-directory: tools/browser-test
+
+      - name: Cache cargo registry (never target/)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: win-x64-cargo-${{ hashFiles('dsh-live2d-pet-desktop/src-tauri/Cargo.lock') }}
+          restore-keys: win-x64-cargo-
+
+      # Off by default: Cubism Core is proprietary and must not be redistributed
+      # in a public build. Without it the pet fetches and caches it on first run.
+      - name: Optional - embed Cubism Core
+        if: inputs.embed_cubism_core
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:USERPROFILE '.dsh\pets\.runtime'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Invoke-WebRequest -UseBasicParsing `
+            -Uri 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js' `
+            -OutFile (Join-Path $dir 'live2dcubismcore.min.js')
+          Get-Item (Join-Path $dir 'live2dcubismcore.min.js') | Format-List Length
+
+      - name: Unit tests (Windows compile check)
+        if: inputs.run_unit_tests
+        run: cargo test --lib
+        working-directory: dsh-live2d-pet-desktop/src-tauri
+
+      # --skip-suite: the bundled drivers launch the exe and drive a real
+      # WebView2 window, which this runner cannot do. The exe is the product.
+      - name: Build portable exe
+        run: node tools/build-portable.mjs --skip-suite
+        working-directory: dsh-live2d-pet-desktop
+
+      - name: Fingerprint
+        shell: pwsh
+        run: |
+          $exe = 'dsh-live2d-pet-desktop/dist/DSH-Pet.exe'
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          Get-Item $exe | Format-List Name, Length, LastWriteTime
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
+          "SHA256 $hash" | Tee-Object -FilePath 'dsh-live2d-pet-desktop/dist/SHA256.txt'
+          "commit " + (git rev-parse HEAD)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-win-x64
+          path: |
+            dsh-live2d-pet-desktop/dist/DSH-Pet.exe
+            dsh-live2d-pet-desktop/dist/SHA256.txt
+          if-no-files-found: error
