@@ -35,7 +35,7 @@ jobs:
 
       - name: Show source commit
         shell: pwsh
-        run: "commit " + (git rev-parse HEAD)
+        run: git rev-parse HEAD
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
