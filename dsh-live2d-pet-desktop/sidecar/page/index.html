@@ -83,6 +83,11 @@
 
   <!-- 插件浏览器半区：**一个字都不改**地跑在桌面端（和真实的 DSH 一样按包名寻址）。 -->
 <script src="/plugins/dsh-pet-live2d/client.js"></script>
+
+  <!-- 我们自己的小工具层（菜单 / 待办 / 提醒气泡 / 快捷启动）。刻意做成独立脚本：
+       不改宠物的 client.js；卡片带 data-panel / data-bubble，hover.js 的穿透判定
+       会把光标落在上面的窗口切成"吃鼠标"。 -->
+  <script src="/page/toolbox.js"></script>
 <script type="module" src="/page/boot.js"></script>
 
 </html>
