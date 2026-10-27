@@ -32,6 +32,19 @@ const PROBE_WAIT: Duration = Duration::from_millis(2500);
 const SSE_PING: Duration = Duration::from_secs(30);
 /// 转发给上游时，等响应头的上限。
 const UPSTREAM_CONNECT: Duration = Duration::from_secs(10);
+/// Pet Toolbox 的 API 前缀（由 DSH 里的 `@local/dsh-pet-toolbox` 提供）。
+///
+/// 桌面窗口里那份页面要靠它读写待办、启动项与设置；**不转发的话菜单能显示、待办却
+/// 全部 404**。它和插件 API 一样只在挂载模式（`--attach`）下转发给 DSH。
+const TOOLBOX_API: &str = "/api/pet-toolbox";
+
+/// 挂载模式下哪些路径转发给 DSH。
+///
+/// **只列白名单**：多加一个前缀，就等于多暴露一块本机接口，不要写成 `/api/*`。
+fn is_proxied(path: &str) -> bool {
+    path == API || path.starts_with(&format!("{API}/"))
+        || path == TOOLBOX_API || path.starts_with(&format!("{TOOLBOX_API}/"))
+}
 
 pub struct Host {
     pub port: u16,
@@ -127,6 +140,9 @@ struct Request {
     origin: Option<String>,
     host: Option<String>,
     content_type: Option<String>,
+    /// Pet Toolbox 的写操作信号头（`x-dsh-pet-toolbox: 1`）。转发时要带上，
+    /// 否则工具箱会按自己的 CSRF 判据回 `403 header-required`。
+    signal: Option<String>,
     too_large: bool,
 }
 
@@ -143,6 +159,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> std::io::Result<Option<Req
     let mut origin = None;
     let mut host = None;
     let mut content_type = None;
+    let mut signal = None;
     loop {
         let mut header = String::new();
         if reader.read_line(&mut header)? == 0 {
@@ -158,6 +175,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> std::io::Result<Option<Req
                 "content-type" => content_type = Some(value.trim().to_string()),
                 "origin" => origin = Some(value.trim().to_string()),
                 "host" => host = Some(value.trim().to_string()),
+                "x-dsh-pet-toolbox" => signal = Some(value.trim().to_string()),
                 _ => {}
             }
         }
@@ -177,6 +195,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> std::io::Result<Option<Req
         origin,
         host,
         content_type,
+        signal,
         too_large,
     }))
 }
@@ -286,14 +305,14 @@ fn route(
     // （页面上照样有宠物，但它其实来自本机扫描）—— 那正是这套架构最不该出现的不确定性。
     // 真兜底由用户显式选择：不加 `--attach` 就是独立模式。
     if let Some(upstream) = &state.attach {
-        if path.starts_with(&format!("{API}/")) || path == API {
+        if is_proxied(path) {
             if path.starts_with(&format!("{API}/sound/")) && method == "POST" {
                 if let Err(error) = check_sound_post(request, stream.local_addr()?.port()) {
                     send_json(stream, error.0, &json!({ "ok": false, "error": error.1 }))?;
                     return Ok(true);
                 }
             }
-            if relay_to_upstream(stream, upstream, method, path, body)? {
+            if relay_to_upstream(stream, upstream, request, path)? {
                 return Ok(false);
             }
             eprintln!("[host] 挂载模式：连不上上游 {upstream}（{path}）");
@@ -943,10 +962,11 @@ fn serve_events(stream: &mut TcpStream, state: &HostState) -> std::io::Result<bo
 fn relay_to_upstream(
     client: &mut TcpStream,
     upstream: &str,
-    method: &str,
+    request: &Request,
     path: &str,
-    body: &str,
 ) -> std::io::Result<bool> {
+    let method = request.method.as_str();
+    let body = request.body.as_str();
     if method != "GET" && method != "POST" && method != "HEAD" {
         return Ok(true); // 只转发这几种；其余交给本机实现去回 405/404
     }
@@ -969,11 +989,25 @@ fn relay_to_upstream(
         return Ok(false);
     };
     server.set_read_timeout(Some(UPSTREAM_CONNECT))?;
-    let request = format!(
-        "{method} {path} HTTP/1.1\r\nhost: {authority}\r\naccept: */*\r\ncontent-type: application/json\r\nconnection: close\r\ncontent-length: {}\r\n\r\n{body}",
+    // 只转发白名单头：`x-dsh-pet-toolbox` 是 Pet Toolbox 写操作的开关（它自己的
+    // CSRF 判据），漏掉它就会出现"菜单能显示、待办点不动"；`origin` 让上游还能做
+    // 同源判断。`host` / `connection` / `content-length` 一律由这里重算，不抄客户端的。
+    let mut head = format!(
+        "{method} {path} HTTP/1.1\r\nhost: {authority}\r\naccept: */*\r\nconnection: close\r\ncontent-length: {}\r\n",
         body.as_bytes().len()
     );
-    server.write_all(request.as_bytes())?;
+    if let Some(value) = &request.content_type {
+        head.push_str(&format!("content-type: {value}\r\n"));
+    }
+    if let Some(value) = &request.origin {
+        head.push_str(&format!("origin: {value}\r\n"));
+    }
+    if let Some(value) = &request.signal {
+        head.push_str(&format!("x-dsh-pet-toolbox: {value}\r\n"));
+    }
+    head.push_str("\r\n");
+    head.push_str(body);
+    server.write_all(head.as_bytes())?;
     server.flush()?;
 
     // 读上游的响应头。
@@ -1215,6 +1249,7 @@ mod sound_tests {
             method: "POST".into(), path: "".into(), body: "".into(), too_large: false,
             host: Some(host.into()), origin: origin.map(|value| value.to_string()),
             content_type: Some(content_type.into()),
+            signal: None,
         };
         // 官方客户端（`dsh-app://app` 页面）转发来的请求**不带 Origin**（实测），此时只看 Host。
         assert_eq!(check_sound_post(&build("127.0.0.1:123", None, "application/json"), 123), Ok(()));
@@ -1240,6 +1275,20 @@ mod sound_tests {
         let home = Path::new("/nonexistent-sound-home");
         assert!(sound_path(home, "../evil", "thinking", true).is_err());
         assert!(sound_path(home, "pet", "idle", true).is_err());
+    }
+
+    /// 挂载模式必须把 Pet Toolbox 的 API 一起转发 —— 否则桌面窗口里"菜单能显示、
+    /// 待办却 404"。反过来，前缀相近的路径不能被误转发。
+    #[test]
+    fn attach_proxy_covers_the_toolbox_api() {
+        assert!(is_proxied("/api/live2d-pet"));
+        assert!(is_proxied("/api/live2d-pet/catalog"));
+        assert!(is_proxied("/api/pet-toolbox"));
+        assert!(is_proxied("/api/pet-toolbox/state"));
+        assert!(is_proxied("/api/pet-toolbox/todos/update"));
+        assert!(!is_proxied("/api/pet-toolbox-evil"));
+        assert!(!is_proxied("/api/other"));
+        assert!(!is_proxied("/"));
     }
 }
 
