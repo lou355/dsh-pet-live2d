@@ -80,6 +80,7 @@
   ].join('')
 
   var ICON = {
+    chat: '<svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4V5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
     plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
     list: '<svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
     play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>',
@@ -264,6 +265,10 @@
     }
 
     if (state.view === 'menu') {
+      menuEl.appendChild(h('button', {
+        class: 'ptb-item',
+        onclick: function () { closeMenu(); if (window.__ptbChat) window.__ptbChat.open() },
+      }, h('span', { class: 'ptb-ico', html: ICON.chat }), '聊天'))
       menuEl.appendChild(h('button', {
         class: 'ptb-item',
         disabled: state.error !== '',
