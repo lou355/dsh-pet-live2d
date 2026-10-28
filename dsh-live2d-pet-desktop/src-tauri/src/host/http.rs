@@ -37,6 +37,8 @@ const UPSTREAM_CONNECT: Duration = Duration::from_secs(10);
 /// 桌面窗口里那份页面要靠它读写待办、启动项与设置；**不转发的话菜单能显示、待办却
 /// 全部 404**。它和插件 API 一样只在挂载模式（`--attach`）下转发给 DSH。
 const TOOLBOX_API: &str = "/api/pet-toolbox";
+/// 桌宠 AI 聊天（`@local/dsh-pet-chat`）的 API 前缀；同样只在挂载模式下转发。
+const CHAT_API: &str = "/api/pet-chat";
 
 /// 挂载模式下哪些路径转发给 DSH。
 ///
@@ -44,6 +46,7 @@ const TOOLBOX_API: &str = "/api/pet-toolbox";
 fn is_proxied(path: &str) -> bool {
     path == API || path.starts_with(&format!("{API}/"))
         || path == TOOLBOX_API || path.starts_with(&format!("{TOOLBOX_API}/"))
+        || path == CHAT_API || path.starts_with(&format!("{CHAT_API}/"))
 }
 
 pub struct Host {
@@ -143,6 +146,8 @@ struct Request {
     /// Pet Toolbox 的写操作信号头（`x-dsh-pet-toolbox: 1`）。转发时要带上，
     /// 否则工具箱会按自己的 CSRF 判据回 `403 header-required`。
     signal: Option<String>,
+    /// 桌宠聊天的写操作信号头（`x-dsh-pet-chat: 1`），同上。
+    chat_signal: Option<String>,
     too_large: bool,
 }
 
@@ -160,6 +165,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> std::io::Result<Option<Req
     let mut host = None;
     let mut content_type = None;
     let mut signal = None;
+    let mut chat_signal = None;
     loop {
         let mut header = String::new();
         if reader.read_line(&mut header)? == 0 {
@@ -176,6 +182,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> std::io::Result<Option<Req
                 "origin" => origin = Some(value.trim().to_string()),
                 "host" => host = Some(value.trim().to_string()),
                 "x-dsh-pet-toolbox" => signal = Some(value.trim().to_string()),
+                "x-dsh-pet-chat" => chat_signal = Some(value.trim().to_string()),
                 _ => {}
             }
         }
@@ -196,6 +203,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> std::io::Result<Option<Req
         host,
         content_type,
         signal,
+        chat_signal,
         too_large,
     }))
 }
@@ -1005,6 +1013,9 @@ fn relay_to_upstream(
     if let Some(value) = &request.signal {
         head.push_str(&format!("x-dsh-pet-toolbox: {value}\r\n"));
     }
+    if let Some(value) = &request.chat_signal {
+        head.push_str(&format!("x-dsh-pet-chat: {value}\r\n"));
+    }
     head.push_str("\r\n");
     head.push_str(body);
     server.write_all(head.as_bytes())?;
@@ -1250,6 +1261,7 @@ mod sound_tests {
             host: Some(host.into()), origin: origin.map(|value| value.to_string()),
             content_type: Some(content_type.into()),
             signal: None,
+            chat_signal: None,
         };
         // 官方客户端（`dsh-app://app` 页面）转发来的请求**不带 Origin**（实测），此时只看 Host。
         assert_eq!(check_sound_post(&build("127.0.0.1:123", None, "application/json"), 123), Ok(()));
@@ -1286,6 +1298,9 @@ mod sound_tests {
         assert!(is_proxied("/api/pet-toolbox"));
         assert!(is_proxied("/api/pet-toolbox/state"));
         assert!(is_proxied("/api/pet-toolbox/todos/update"));
+        assert!(is_proxied("/api/pet-chat"));
+        assert!(is_proxied("/api/pet-chat/send"));
+        assert!(!is_proxied("/api/pet-chat-evil"));
         assert!(!is_proxied("/api/pet-toolbox-evil"));
         assert!(!is_proxied("/api/other"));
         assert!(!is_proxied("/"));
