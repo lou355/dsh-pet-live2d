@@ -492,7 +492,10 @@
     closeMenu()
     var pet = document.querySelector(PET)
     if (!pet) return
-    var rect = pet.getBoundingClientRect()
+    // 原面板的 onContextMenu 挂在 `[data-hit]`（剪影那一层）上，**不是**宠物根节点；
+    // 在根节点上派发事件不会往下传到子元素 —— 那样点了就是"没反应"。
+    var target = pet.querySelector('[data-hit]') || pet
+    var rect = target.getBoundingClientRect()
     var event = new MouseEvent('contextmenu', {
       bubbles: true,
       cancelable: true,
@@ -502,7 +505,7 @@
       buttons: 2,
     })
     event.__ptbSynthetic = true
-    pet.dispatchEvent(event)
+    target.dispatchEvent(event)
   }
 
   document.addEventListener('contextmenu', function (event) {
