@@ -258,7 +258,8 @@
   function setStreaming(on) {
     state.streaming = on
     sendBtn.textContent = on ? '停止' : '发送'
-    input.disabled = on
+    // 输入框保持可用：回复过程中也能先把下一句打好。**不能 disable** —— 那会丢焦点，
+    // 用户发送完就得再点一次输入框才能继续打字。
     personaBtn.disabled = on
     if (on) setStatus('正在回复…')
   }
@@ -285,6 +286,8 @@
     setStreaming(false)
     state.controller = null
     sendBtn.disabled = false
+    // 回复结束把焦点还给输入框，接着打下一句不用再点一次。
+    input.focus()
   }
 
   function send() {
@@ -296,6 +299,7 @@
     if (text === '') return
     state.error = ''
     input.value = ''
+    input.focus()
     body.appendChild(messageNode('user', text))
     var reply = messageNode('assistant', '')
     body.appendChild(reply)
@@ -315,7 +319,10 @@
       cache: 'no-store',
     }).then(function (response) {
       if (!response.ok || response.body === null) {
-        throw new Error('HTTP ' + response.status)
+        // 把服务端的具体原因显示出来（header-required / forbidden / ...），不要只给 HTTP 403。
+        return response.json().catch(function () { return null }).then(function (data) {
+          throw new Error(data && data.error ? data.error : 'HTTP ' + response.status)
+        })
       }
       var reader = response.body.getReader()
       var decoder = new TextDecoder()
@@ -450,7 +457,9 @@
     foot.style.display = ''
     card.style.display = 'flex'
     place()
-    loadState()
+    startFollow()
+    // 正在生成时重开面板：不要用历史覆盖掉正在流式追加的那条。
+    if (!state.streaming) loadState()
     setTimeout(function () { input.focus() }, 60)
   }
 
@@ -459,6 +468,42 @@
     if (state.controller) state.controller.abort()
     card.style.display = 'none'
   }
+
+  /** 只隐藏、不打断正在进行的回复（点桌面/别的程序时用这个）。 */
+  function hide() {
+    state.open = false
+    card.style.display = 'none'
+  }
+
+  /** 卡片跟着桌宠走：桌宠被拖动/缩放时，每 200ms 重新贴一次。 */
+  var followTimer = 0
+  function startFollow() {
+    if (followTimer !== 0) return
+    followTimer = window.setInterval(function () {
+      if (!state.open) {
+        window.clearInterval(followTimer)
+        followTimer = 0
+        return
+      }
+      place()
+    }, 200)
+  }
+
+  // 点桌面/别的程序：这个窗口会失焦（桌面点击是穿透的，页面收不到 pointerdown），
+  // 所以用 blur 来收起卡片；不 abort，正在生成的回复继续跑完。
+  window.addEventListener('blur', function () {
+    if (state.open) hide()
+  })
+
+  // 窗口内部的点击：点她/拖她时保持打开（方便边拖边看），点其它地方收起。
+  document.addEventListener('pointerdown', function (event) {
+    if (!state.open) return
+    var target = event.target
+    if (!target || !target.closest) return
+    if (target.closest('#ptb-chat')) return
+    if (target.closest(PET)) return
+    hide()
+  }, true)
 
   /* -------------------------------------------------------------- events */
 
@@ -481,6 +526,8 @@
     if (event.key !== 'Enter') return
     if (event.isComposing || composing || event.shiftKey) return
     event.preventDefault()
+    // 回复中按回车不要误触"停止"；要停请点按钮。
+    if (state.streaming) return
     send()
   })
 

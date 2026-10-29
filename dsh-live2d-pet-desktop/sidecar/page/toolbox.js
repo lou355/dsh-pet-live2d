@@ -455,6 +455,7 @@
       )
     )
     placeBubble()
+    startFollow()
     flashExpression()
   }
 
@@ -481,12 +482,31 @@
     state.open = true
     state.view = 'menu'
     render()
+    startFollow()
   }
 
   function closeMenu() {
     state.open = false
     state.view = 'menu'
     menuEl.style.display = 'none'
+  }
+
+  /**
+   * 菜单与提醒气泡跟着桌宠走：她被抓取拖动/缩放时，每 200ms 重新贴一次。
+   * 只在"有东西开着"的时候跑，关掉就自己停。
+   */
+  var followTimer = 0
+  function startFollow() {
+    if (followTimer !== 0) return
+    followTimer = window.setInterval(function () {
+      if (!state.open && state.bubble === null) {
+        window.clearInterval(followTimer)
+        followTimer = 0
+        return
+      }
+      if (state.open) placeMenu()
+      if (state.bubble !== null) placeBubble()
+    }, 200)
   }
 
   /**
@@ -527,8 +547,16 @@
     if (!state.open) return
     var target = event.target
     if (target && target.closest && target.closest('#ptb-layer')) return
+    // 点她/拖她时先不关：卡片会跟着她走（见 startFollow）。
+    if (target && target.closest && target.closest(PET)) return
     closeMenu()
   }, true)
+
+  // 点桌面/别的程序：桌面点击会穿透到下面，页面收不到 pointerdown；
+  // 这个窗口失焦就是"用户点了别处"的信号。
+  window.addEventListener('blur', function () {
+    if (state.open) closeMenu()
+  })
 
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape' && state.open) closeMenu()
