@@ -186,6 +186,18 @@
   }
 
   /**
+   * 这个点是不是落在她身上。
+   *
+   * 拖动时 pointerdown 的 DOM 目标未必能通过 `closest` 认出来（剪影代理/画布等），
+   * 所以用她所在的矩形做兜底判断 —— 否则"拖她"会被当成"点了别处"，把卡片收起来。
+   */
+  function nearPet(x, y) {
+    var rect = petRect()
+    if (!rect) return false
+    return x >= rect.left - 6 && x <= rect.right + 6 && y >= rect.top - 6 && y <= rect.bottom + 6
+  }
+
+  /**
    * 把卡片贴到她旁边。
    *
    * `measure=true` 时重新量一次尺寸（切视图/首次打开）；跟随循环里用缓存的尺寸，
@@ -504,21 +516,31 @@
     followRaf = window.requestAnimationFrame(tick)
   }
 
+  // 桌宠被按住/拖动期间，窗口失焦不算"点了别处"。
+  var petDown = false
+  window.addEventListener('pointerup', function () { petDown = false }, true)
+
   // 点桌面/别的程序：这个窗口会失焦（桌面点击是穿透的，页面收不到 pointerdown），
   // 所以用 blur 来收起卡片；不 abort，正在生成的回复继续跑完。
   window.addEventListener('blur', function () {
-    if (state.open) hide()
+    if (state.open && !petDown) hide()
   })
 
   // 窗口内部的点击：点她/拖她时保持打开（方便边拖边看），点其它地方收起。
   document.addEventListener('pointerdown', function (event) {
+    // 按矩形判断"在她身上"：拖动时事件目标可能认不出来。
+    petDown = nearPet(event.clientX, event.clientY)
+    if (petDown) return
     if (!state.open) return
     var target = event.target
-    if (!target || !target.closest) return
-    if (target.closest('#ptb-chat')) return
-    if (target.closest(PET)) return
+    if (target && target.closest && target.closest('#ptb-chat')) return
     hide()
   }, true)
+
+  // 拖动时和拖拽同帧更新；rAF 循环保底，两条都开，谁先到谁更新。
+  window.addEventListener('pointermove', function () {
+    if (state.open) place()
+  }, { passive: true })
 
   /* -------------------------------------------------------------- events */
 

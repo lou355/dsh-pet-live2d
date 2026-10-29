@@ -203,6 +203,13 @@
     return rect
   }
 
+  /** 这个点是不是落在她身上（拖动时 DOM 目标未必认得出，用矩形兜底）。 */
+  function nearPet(x, y) {
+    var rect = petRect()
+    if (!rect) return false
+    return x >= rect.left - 6 && x <= rect.right + 6 && y >= rect.top - 6 && y <= rect.bottom + 6
+  }
+
   // ------------------------------------------------------------- placement
 
   /**
@@ -560,20 +567,31 @@
     openMenu()
   }, true)
 
+  // 桌宠被按住/拖动期间，窗口失焦不算"点了别处"。
+  var petDown = false
+  window.addEventListener('pointerup', function () { petDown = false }, true)
+
   document.addEventListener('pointerdown', function (event) {
+    // 按矩形判断"在她身上"：拖动时事件目标可能认不出来。
+    petDown = nearPet(event.clientX, event.clientY)
+    if (petDown) return
     if (!state.open) return
     var target = event.target
     if (target && target.closest && target.closest('#ptb-layer')) return
-    // 点她/拖她时先不关：卡片会跟着她走（见 startFollow）。
-    if (target && target.closest && target.closest(PET)) return
     closeMenu()
   }, true)
 
   // 点桌面/别的程序：桌面点击会穿透到下面，页面收不到 pointerdown；
   // 这个窗口失焦就是"用户点了别处"的信号。
   window.addEventListener('blur', function () {
-    if (state.open) closeMenu()
+    if (state.open && !petDown) closeMenu()
   })
+
+  // 拖动时和拖拽同帧更新卡片位置（rAF 循环保底）。
+  window.addEventListener('pointermove', function () {
+    if (state.open) placeMenu()
+    if (state.bubble !== null) placeBubble()
+  }, { passive: true })
 
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape' && state.open) closeMenu()
