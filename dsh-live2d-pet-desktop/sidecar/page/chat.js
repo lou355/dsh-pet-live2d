@@ -26,7 +26,7 @@
   }
 
   var CSS = [
-    '#ptb-chat{position:fixed;pointer-events:auto;display:none;width:300px;max-height:min(460px,80vh);',
+    '#ptb-chat{position:fixed;left:0;top:0;pointer-events:auto;display:none;width:300px;max-height:min(460px,80vh);',
     'flex-direction:column;border-radius:16px;background:rgba(255,250,240,.98);border:1px solid rgba(139,158,174,.55);',
     'box-shadow:0 14px 36px rgba(48,67,86,.24);color:#34465a;font-size:13px;line-height:1.55;',
     'font-family:"Microsoft YaHei UI","PingFang SC","Segoe UI",system-ui,sans-serif;backdrop-filter:blur(10px);z-index:2147483001}',
@@ -185,20 +185,34 @@
     return rect
   }
 
-  function place() {
+  /**
+   * 把卡片贴到她旁边。
+   *
+   * `measure=true` 时重新量一次尺寸（切视图/首次打开）；跟随循环里用缓存的尺寸，
+   * **不再每帧读 offsetWidth/offsetHeight** —— 那会强制布局，正是拖动卡顿的来源。
+   * 位置用 transform 写，只在真的变化时写，不碰 left/top。
+   */
+  var box = { w: 0, h: 0, x: null, y: null }
+
+  function place(measure) {
+    if (measure === true || box.w === 0) {
+      card.style.visibility = 'hidden'
+      card.style.display = 'flex'
+      box.w = card.offsetWidth
+      box.h = card.offsetHeight
+      card.style.visibility = 'visible'
+    }
     var rect = petRect()
-    card.style.visibility = 'hidden'
-    card.style.display = 'flex'
-    var width = card.offsetWidth
-    var height = card.offsetHeight
-    var left = rect ? rect.left - width - 16 : 120
+    var left = rect ? rect.left - box.w - 16 : 120
     if (left < 8) left = rect ? rect.right + 16 : 120
-    if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8
-    var top = rect ? rect.top + rect.height / 2 - height / 2 : 120
-    top = Math.max(8, Math.min(top, window.innerHeight - height - 8))
-    card.style.left = Math.max(8, left) + 'px'
-    card.style.top = top + 'px'
-    card.style.visibility = 'visible'
+    if (left + box.w > window.innerWidth - 8) left = window.innerWidth - box.w - 8
+    var top = rect ? rect.top + rect.height / 2 - box.h / 2 : 120
+    top = Math.max(8, Math.min(top, window.innerHeight - box.h - 8))
+    left = Math.max(8, left)
+    if (box.x !== null && Math.abs(box.x - left) < 0.5 && Math.abs(box.y - top) < 0.5) return
+    box.x = left
+    box.y = top
+    card.style.transform = 'translate3d(' + left + 'px,' + top + 'px,0)'
   }
 
   function apiGet(path) {
@@ -276,6 +290,7 @@
       modelLabel.textContent = data.model ? data.model : ''
       historyCheck.checked = state.historyEnabled
       renderMessages()
+      place(true)
       if (state.usage) setStatus('累计 ' + (state.usage.input || 0) + ' in / ' + (state.usage.output || 0) + ' out')
     }).catch(function (error) {
       showError('连不上 DSH：' + String(error.message || error))
@@ -393,7 +408,7 @@
     foot.style.display = 'none'
     personaView.style.display = 'flex'
     personaInput.focus()
-    place()
+    place(true)
   }
 
   function closePersona() {
@@ -401,7 +416,7 @@
     personaView.style.display = 'none'
     body.style.display = ''
     foot.style.display = ''
-    place()
+    place(true)
   }
 
   function savePersona() {
@@ -440,6 +455,7 @@
     apiPost('/reset', {}).then(function () {
       state.messages = []
       renderMessages()
+      place(true)
       setStatus('已清空')
     }).catch(function (error) {
       setStatus('清空失败：' + String(error.message || error))
@@ -456,7 +472,7 @@
     body.style.display = ''
     foot.style.display = ''
     card.style.display = 'flex'
-    place()
+    place(true)
     startFollow()
     // 正在生成时重开面板：不要用历史覆盖掉正在流式追加的那条。
     if (!state.streaming) loadState()
@@ -475,18 +491,17 @@
     card.style.display = 'none'
   }
 
-  /** 卡片跟着桌宠走：桌宠被拖动/缩放时，每 200ms 重新贴一次。 */
-  var followTimer = 0
+  /** 卡片跟着桌宠走：rAF 每帧读一次她的位置，只有真的移动了才写 transform。 */
+  var followRaf = 0
   function startFollow() {
-    if (followTimer !== 0) return
-    followTimer = window.setInterval(function () {
-      if (!state.open) {
-        window.clearInterval(followTimer)
-        followTimer = 0
-        return
-      }
+    if (followRaf !== 0) return
+    var tick = function () {
+      followRaf = 0
+      if (!state.open) return
       place()
-    }, 200)
+      followRaf = window.requestAnimationFrame(tick)
+    }
+    followRaf = window.requestAnimationFrame(tick)
   }
 
   // 点桌面/别的程序：这个窗口会失焦（桌面点击是穿透的，页面收不到 pointerdown），

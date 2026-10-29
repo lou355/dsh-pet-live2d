@@ -34,7 +34,7 @@
     '#ptb-layer{position:fixed;inset:0;pointer-events:none;z-index:2147483000;',
     'font-family:"Microsoft YaHei UI","PingFang SC","Segoe UI",system-ui,sans-serif}',
     '#ptb-layer *{box-sizing:border-box}',
-    '.ptb-card{position:fixed;pointer-events:auto;width:238px;padding:10px;border-radius:16px;',
+    '.ptb-card{position:fixed;left:0;top:0;pointer-events:auto;width:238px;padding:10px;border-radius:16px;',
     'background:rgba(255,250,240,.97);border:1px solid rgba(139,158,174,.55);',
     'box-shadow:0 12px 32px rgba(48,67,86,.22);color:#34465a;font-size:13px;line-height:1.5;',
     'backdrop-filter:blur(10px);display:none}',
@@ -66,7 +66,7 @@
     'background:#fff;color:#34465a;font:inherit;font-size:12px;cursor:pointer}',
     '.ptb-btn[data-primary]{background:#5b7c99;border-color:#5b7c99;color:#fff}',
     '.ptb-btn:disabled{opacity:.5;cursor:default}',
-    '.ptb-bubble{position:fixed;pointer-events:auto;max-width:252px;padding:10px 12px;border-radius:16px;',
+    '.ptb-bubble{position:fixed;left:0;top:0;pointer-events:auto;max-width:252px;padding:10px 12px;border-radius:16px;',
     'background:rgba(255,250,240,.98);border:1px solid rgba(139,158,174,.6);',
     'box-shadow:0 10px 26px rgba(48,67,86,.24);color:#34465a;font-size:13px;line-height:1.55;display:none}',
     '.ptb-bubble::after{content:"";position:absolute;left:50%;bottom:-7px;width:12px;height:12px;',
@@ -205,35 +205,53 @@
 
   // ------------------------------------------------------------- placement
 
-  function placeMenu() {
+  /**
+   * 贴到她旁边。`measure=true` 时重新量尺寸（打开/切页/内容变化）；
+   * 跟随循环用缓存尺寸，位置只在变化时写 transform —— 不再每帧读 offsetWidth，
+   * 避免强制布局（那是拖动卡顿的来源）。
+   */
+  var menuBox = { w: 0, h: 0, x: null, y: null }
+  var bubbleBox = { w: 0, h: 0, x: null, y: null }
+
+  function placeMenu(measure) {
+    if (measure === true || menuBox.w === 0) {
+      menuEl.style.visibility = 'hidden'
+      menuEl.style.display = 'block'
+      menuBox.w = menuEl.offsetWidth
+      menuBox.h = menuEl.offsetHeight
+      menuEl.style.visibility = 'visible'
+    }
     var rect = petRect()
-    menuEl.style.visibility = 'hidden'
-    menuEl.style.display = 'block'
-    var width = menuEl.offsetWidth
-    var height = menuEl.offsetHeight
-    var left = rect ? rect.left - width - 14 : 120
+    var left = rect ? rect.left - menuBox.w - 14 : 120
     if (left < 8) left = rect ? rect.right + 14 : 120
-    if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8
+    if (left + menuBox.w > window.innerWidth - 8) left = window.innerWidth - menuBox.w - 8
     var top = rect ? rect.top + 24 : 120
-    top = Math.max(8, Math.min(top, window.innerHeight - height - 8))
-    menuEl.style.left = Math.max(8, left) + 'px'
-    menuEl.style.top = top + 'px'
-    menuEl.style.visibility = 'visible'
+    top = Math.max(8, Math.min(top, window.innerHeight - menuBox.h - 8))
+    left = Math.max(8, left)
+    if (menuBox.x !== null && Math.abs(menuBox.x - left) < 0.5 && Math.abs(menuBox.y - top) < 0.5) return
+    menuBox.x = left
+    menuBox.y = top
+    menuEl.style.transform = 'translate3d(' + left + 'px,' + top + 'px,0)'
   }
 
-  function placeBubble() {
+  function placeBubble(measure) {
+    if (measure === true || bubbleBox.w === 0) {
+      bubbleEl.style.visibility = 'hidden'
+      bubbleEl.style.display = 'block'
+      bubbleBox.w = bubbleEl.offsetWidth
+      bubbleBox.h = bubbleEl.offsetHeight
+      bubbleEl.style.visibility = 'visible'
+    }
     var rect = petRect()
-    bubbleEl.style.visibility = 'hidden'
-    bubbleEl.style.display = 'block'
-    var width = bubbleEl.offsetWidth
-    var height = bubbleEl.offsetHeight
-    var left = rect ? rect.left + rect.width / 2 - width / 2 : window.innerWidth / 2 - width / 2
-    left = Math.max(10, Math.min(left, window.innerWidth - width - 10))
-    var top = rect ? rect.top + 28 - height - 10 : 80
-    if (top < 10) top = rect ? Math.min(rect.bottom + 12, window.innerHeight - height - 10) : 80
-    bubbleEl.style.left = left + 'px'
-    bubbleEl.style.top = Math.max(10, top) + 'px'
-    bubbleEl.style.visibility = 'visible'
+    var left = rect ? rect.left + rect.width / 2 - bubbleBox.w / 2 : window.innerWidth / 2 - bubbleBox.w / 2
+    left = Math.max(10, Math.min(left, window.innerWidth - bubbleBox.w - 10))
+    var top = rect ? rect.top + 28 - bubbleBox.h - 10 : 80
+    if (top < 10) top = rect ? Math.min(rect.bottom + 12, window.innerHeight - bubbleBox.h - 10) : 80
+    top = Math.max(10, top)
+    if (bubbleBox.x !== null && Math.abs(bubbleBox.x - left) < 0.5 && Math.abs(bubbleBox.y - top) < 0.5) return
+    bubbleBox.x = left
+    bubbleBox.y = top
+    bubbleEl.style.transform = 'translate3d(' + left + 'px,' + top + 'px,0)'
   }
 
   // ----------------------------------------------------------------- views
@@ -364,7 +382,7 @@
       ))
     }
 
-    placeMenu()
+    placeMenu(true)
   }
 
   // --------------------------------------------------------------- actions
@@ -454,7 +472,7 @@
         })
       )
     )
-    placeBubble()
+    placeBubble(true)
     startFollow()
     flashExpression()
   }
@@ -492,21 +510,20 @@
   }
 
   /**
-   * 菜单与提醒气泡跟着桌宠走：她被抓取拖动/缩放时，每 200ms 重新贴一次。
+   * 菜单与提醒气泡跟着桌宠走：rAF 每帧读一次她的位置，只有真的移动了才写 transform。
    * 只在"有东西开着"的时候跑，关掉就自己停。
    */
-  var followTimer = 0
+  var followRaf = 0
   function startFollow() {
-    if (followTimer !== 0) return
-    followTimer = window.setInterval(function () {
-      if (!state.open && state.bubble === null) {
-        window.clearInterval(followTimer)
-        followTimer = 0
-        return
-      }
+    if (followRaf !== 0) return
+    var tick = function () {
+      followRaf = 0
+      if (!state.open && state.bubble === null) return
       if (state.open) placeMenu()
       if (state.bubble !== null) placeBubble()
-    }, 200)
+      followRaf = window.requestAnimationFrame(tick)
+    }
+    followRaf = window.requestAnimationFrame(tick)
   }
 
   /**
@@ -563,8 +580,8 @@
   }, true)
 
   window.addEventListener('resize', function () {
-    if (state.open) placeMenu()
-    if (state.bubble !== null) placeBubble()
+    if (state.open) placeMenu(true)
+    if (state.bubble !== null) placeBubble(true)
   })
 
   // ------------------------------------------------------------------ boot
